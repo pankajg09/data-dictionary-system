@@ -1,13 +1,10 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { GoogleOAuthProvider } from '@react-oauth/google';
+import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
-
-// Components
+import theme from './theme';
 import Layout from './components/Layout';
-import PrivateRoute from './components/PrivateRoute';
-
-// Pages
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
@@ -15,71 +12,29 @@ import Analysis from './pages/Analysis';
 import Review from './pages/Review';
 import DataDictionary from './pages/DataDictionary';
 
-// Theme
-const theme = createTheme({
-  palette: {
-    mode: 'light',
-    primary: {
-      main: '#1976d2',
-    },
-    secondary: {
-      main: '#dc004e',
-    },
-  },
-});
+const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
 
-function App() {
+const App: React.FC = () => {
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <Router>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route
-            path="/"
-            element={
-              <PrivateRoute>
-                <Layout>
-                  <Dashboard />
-                </Layout>
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/analysis"
-            element={
-              <PrivateRoute>
-                <Layout>
-                  <Analysis />
-                </Layout>
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/review"
-            element={
-              <PrivateRoute>
-                <Layout>
-                  <Review />
-                </Layout>
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/dictionary"
-            element={
-              <PrivateRoute>
-                <Layout>
-                  <DataDictionary />
-                </Layout>
-              </PrivateRoute>
-            }
-          />
-        </Routes>
-      </Router>
-    </ThemeProvider>
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <BrowserRouter>
+          <Layout>
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/analysis" element={<Analysis />} />
+              <Route path="/review" element={<Review />} />
+              <Route path="/dictionary" element={<DataDictionary />} />
+              <Route path="/" element={<Navigate to="/dashboard" />} />
+            </Routes>
+          </Layout>
+        </BrowserRouter>
+      </ThemeProvider>
+    </GoogleOAuthProvider>
   );
-}
+};
 
 export default App; 

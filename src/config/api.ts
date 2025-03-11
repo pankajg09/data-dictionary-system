@@ -1,5 +1,4 @@
 import axios from 'axios';
-import type { AxiosRequestConfig } from 'axios';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
@@ -10,9 +9,9 @@ const api = axios.create({
   },
 });
 
-api.interceptors.request.use((config: AxiosRequestConfig & { headers: any }) => {
+api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
-  if (token) {
+  if (token && config.headers) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;

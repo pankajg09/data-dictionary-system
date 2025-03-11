@@ -45,12 +45,33 @@ export interface ReviewDetail extends Review {
   reviewer: string;
 }
 
+export interface TableField {
+  name: string;
+  type: string;
+  description: string;
+}
+
+export interface TableInfo {
+  name: string;
+  fields: TableField[];
+}
+
+export interface Relationship {
+  from: string;
+  to: string;
+  type: string;
+}
+
+export interface CodeSnippet {
+  file: string;
+  line: number;
+  code: string;
+  description: string;
+}
+
 export interface AnalysisResult {
-  data_dictionary: DataDictionaryEntry[];
-  code_snippets: {
-    file: string;
-    line: number;
-    snippet: string;
-  }[];
+  tables: TableInfo[];
+  relationships: Relationship[];
+  code_snippets: CodeSnippet[];
   suggestions: string[];
 } 

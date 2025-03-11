@@ -203,7 +203,7 @@ const Analysis: React.FC = () => {
                   <Typography variant="h6" gutterBottom>
                     Code Snippets
                   </Typography>
-                  {result.codeSnippets.map((snippet, index) => (
+                  {result.code_snippets.map((snippet, index) => (
                     <Box key={index} sx={{ mb: 2 }}>
                       <Typography variant="subtitle2">
                         {snippet.file}:{snippet.line}
