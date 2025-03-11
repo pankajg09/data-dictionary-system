@@ -63,6 +63,12 @@ const Analysis: React.FC = () => {
         formData.append('code', code);
       }
 
+      console.log('Sending analysis request to:', '/api/analysis/analyze');
+      console.log('Request payload:', {
+        fileProvided: !!file,
+        codeLength: code.length
+      });
+
       const response = await api.post<AnalysisResult>('/api/analysis/analyze', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
@@ -76,9 +82,27 @@ const Analysis: React.FC = () => {
 
       setResult(response.data);
     } catch (err: any) {
-      const errorMessage = err.response?.data?.message || err.message || 'Analysis failed. Please try again.';
-      setError(errorMessage);
-      console.error('Analysis error:', err);
+      console.error('Full error object:', err);
+      
+      // More detailed error logging
+      if (err.response) {
+        // The request was made and the server responded with a status code
+        console.error('Response error details:', {
+          status: err.response.status,
+          data: err.response.data,
+          headers: err.response.headers
+        });
+        
+        setError(`Server Error: ${err.response.status} - ${err.response.data?.message || 'Unknown error'}`);
+      } else if (err.request) {
+        // The request was made but no response was received
+        console.error('No response received:', err.request);
+        setError('No response from server. Please check your network connection.');
+      } else {
+        // Something happened in setting up the request
+        console.error('Error setting up request:', err.message);
+        setError(`Request setup error: ${err.message}`);
+      }
     } finally {
       setLoading(false);
     }
