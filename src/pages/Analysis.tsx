@@ -14,9 +14,8 @@ import {
   Chip,
 } from '@mui/material';
 import { CloudUpload as UploadIcon } from '@mui/icons-material';
-import axios from 'axios';
-import { AnalysisResult } from '../types/api';
 import api from '../config/api';
+import { AnalysisResult } from '../types/api';
 
 const Analysis: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -54,6 +53,7 @@ const Analysis: React.FC = () => {
 
     setLoading(true);
     setError(null);
+    setResult(null);
 
     try {
       let formData = new FormData();
@@ -67,11 +67,18 @@ const Analysis: React.FC = () => {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+        timeout: 30000, // 30 second timeout
       });
 
+      if (!response.data) {
+        throw new Error('No data received from server');
+      }
+
       setResult(response.data);
-    } catch (err) {
-      setError('Analysis failed. Please try again.');
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.message || err.message || 'Analysis failed. Please try again.';
+      setError(errorMessage);
+      console.error('Analysis error:', err);
     } finally {
       setLoading(false);
     }

@@ -5,6 +5,7 @@ import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import theme from './theme';
 import Layout from './components/Layout';
+import ErrorBoundary from './components/ErrorBoundary';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
@@ -16,24 +17,26 @@ const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
 
 const App: React.FC = () => {
   return (
-    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <BrowserRouter>
-          <Layout>
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route path="/register" element={<Register />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/analysis" element={<Analysis />} />
-              <Route path="/review" element={<Review />} />
-              <Route path="/dictionary" element={<DataDictionary />} />
-              <Route path="/" element={<Navigate to="/dashboard" />} />
-            </Routes>
-          </Layout>
-        </BrowserRouter>
-      </ThemeProvider>
-    </GoogleOAuthProvider>
+    <ErrorBoundary>
+      <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+        <ThemeProvider theme={theme}>
+          <CssBaseline />
+          <BrowserRouter>
+            <Layout>
+              <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route path="/register" element={<Register />} />
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/analysis" element={<Analysis />} />
+                <Route path="/review" element={<Review />} />
+                <Route path="/dictionary" element={<DataDictionary />} />
+                <Route path="/" element={<Navigate to="/dashboard" />} />
+              </Routes>
+            </Layout>
+          </BrowserRouter>
+        </ThemeProvider>
+      </GoogleOAuthProvider>
+    </ErrorBoundary>
   );
 };
 

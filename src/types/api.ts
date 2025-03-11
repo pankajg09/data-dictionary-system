@@ -1,5 +1,20 @@
+export interface ApiError {
+  message: string;
+  code: string;
+  details?: any;
+}
+
+export interface ApiErrorResponse {
+  response?: {
+    data?: ApiError;
+    status?: number;
+    statusText?: string;
+  };
+}
+
 export interface AuthResponse {
-  access_token: string;
+  token: string;
+  user: User;
 }
 
 export interface DashboardStats {
@@ -70,8 +85,30 @@ export interface CodeSnippet {
 }
 
 export interface AnalysisResult {
-  tables: TableInfo[];
-  relationships: Relationship[];
-  code_snippets: CodeSnippet[];
-  suggestions: string[];
+  tables: Array<{
+    name: string;
+    fields: Array<{
+      name: string;
+      type: string;
+      description: string;
+    }>;
+  }>;
+  relationships: Array<{
+    from: string;
+    to: string;
+    type: string;
+  }>;
+  code_snippets: Array<{
+    file: string;
+    line: number;
+    code: string;
+    description: string;
+  }>;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: 'admin' | 'user';
 } 

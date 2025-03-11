@@ -33,7 +33,7 @@ const useAuthStore = create<AuthState>((set) => ({
         email,
         password,
       });
-      localStorage.setItem('token', response.data.access_token);
+      localStorage.setItem('token', response.data.token);
       const userResponse = await api.get<User>('/api/auth/me');
       set({
         user: userResponse.data,
@@ -54,7 +54,7 @@ const useAuthStore = create<AuthState>((set) => ({
       const response = await api.post<AuthResponse>('/api/auth/google', {
         credential,
       });
-      localStorage.setItem('token', response.data.access_token);
+      localStorage.setItem('token', response.data.token);
       const userResponse = await api.get<User>('/api/auth/me');
       set({
         user: userResponse.data,
