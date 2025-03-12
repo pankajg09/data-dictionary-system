@@ -28,10 +28,16 @@ class Analysis(Base):
     status = Column(String)  # draft, pending_review, approved, rejected
     code_location = Column(String)  # Git repository URL
     documentation = Column(JSON)
+    analysis_results = Column(JSON)  # Store the complete analysis results
+    review_status = Column(String, default='pending')  # pending, in_review, reviewed
+    reviewer_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+    review_comments = Column(JSON)
+    review_date = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    analyst = relationship("User", backref="analyses")
+    analyst = relationship("User", foreign_keys=[analyst_id], backref="analyses_created")
+    reviewer = relationship("User", foreign_keys=[reviewer_id], backref="analyses_reviewed")
     data_dictionaries = relationship("DataDictionary", back_populates="analysis")
     reviews = relationship("Review", back_populates="analysis")
 
@@ -81,4 +87,19 @@ class CodeSnippet(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    analysis = relationship("Analysis") 
+    analysis = relationship("Analysis")
+
+class QueryExecution(Base):
+    __tablename__ = 'query_executions'
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    analysis_id = Column(Integer, ForeignKey('analyses.id'), nullable=False)
+    query_content = Column(String, nullable=False)
+    execution_time = Column(DateTime, default=datetime.utcnow)
+    execution_status = Column(String)  # success, failed
+    error_message = Column(String, nullable=True)
+    execution_duration = Column(Integer)  # in milliseconds
+    
+    user = relationship("User", backref="query_executions")
+    analysis = relationship("Analysis", backref="query_executions") 

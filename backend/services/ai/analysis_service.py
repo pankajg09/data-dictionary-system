@@ -3,18 +3,23 @@ import re
 from typing import Dict, List, Optional
 from openai import OpenAI
 from sqlalchemy.orm import Session
+from datetime import datetime, time
 
-from ...models.base import Analysis, DataDictionary, CodeSnippet
+from ...models.base import Analysis, DataDictionary, CodeSnippet, QueryExecution
 
 class AnalysisService:
     def __init__(self, db_session: Session, openai_client: OpenAI):
         self.db = db_session
         self.ai = openai_client
         
-    async def analyze_code(self, code: str) -> Dict:
+    async def analyze_code(self, code: str, analysis_id: Optional[int] = None, user_id: Optional[int] = None) -> Dict:
         """
-        Analyze code using OpenAI to extract data dictionary information
+        Analyze code using OpenAI to extract data dictionary information and optionally store results
         """
+        start_time = datetime.utcnow()
+        execution_status = "success"
+        error_message = None
+        
         try:
             response = await self.ai.chat.completions.create(
                 model="gpt-4",
@@ -24,22 +29,118 @@ class AnalysisService:
                 ]
             )
             
-            return self._parse_ai_response(response.choices[0].message.content)
+            analysis_result = self._parse_ai_response(response.choices[0].message.content)
+            
+            # If analysis_id is provided, store the results
+            if analysis_id:
+                await self.store_analysis_results(analysis_id, analysis_result)
+            
+            return analysis_result
         except Exception as e:
+            execution_status = "failed"
+            error_message = str(e)
             raise Exception(f"Error analyzing code: {str(e)}")
+        finally:
+            if analysis_id and user_id:
+                end_time = datetime.utcnow()
+                duration = int((end_time - start_time).total_seconds() * 1000)  # Convert to milliseconds
+                
+                # Record query execution
+                query_execution = QueryExecution(
+                    user_id=user_id,
+                    analysis_id=analysis_id,
+                    query_content=code[:1000],  # Store first 1000 characters of the query
+                    execution_status=execution_status,
+                    error_message=error_message,
+                    execution_duration=duration
+                )
+                self.db.add(query_execution)
+                try:
+                    self.db.commit()
+                except Exception:
+                    self.db.rollback()
+    
+    async def store_analysis_results(self, analysis_id: int, results: Dict) -> None:
+        """
+        Store analysis results in the database
+        """
+        try:
+            analysis = self.db.query(Analysis).filter(Analysis.id == analysis_id).first()
+            if not analysis:
+                raise Exception(f"Analysis with id {analysis_id} not found")
+            
+            analysis.analysis_results = results
+            analysis.status = 'pending_review'
+            analysis.review_status = 'pending'
+            
+            self.db.commit()
+        except Exception as e:
+            self.db.rollback()
+            raise Exception(f"Error storing analysis results: {str(e)}")
+    
+    async def submit_for_review(self, analysis_id: int, reviewer_id: int) -> None:
+        """
+        Submit analysis for review
+        """
+        try:
+            analysis = self.db.query(Analysis).filter(Analysis.id == analysis_id).first()
+            if not analysis:
+                raise Exception(f"Analysis with id {analysis_id} not found")
+            
+            analysis.reviewer_id = reviewer_id
+            analysis.review_status = 'in_review'
+            analysis.status = 'pending_review'
+            
+            self.db.commit()
+        except Exception as e:
+            self.db.rollback()
+            raise Exception(f"Error submitting for review: {str(e)}")
+    
+    async def submit_review(self, analysis_id: int, reviewer_id: int, comments: Dict, approved: bool) -> None:
+        """
+        Submit review for an analysis
+        """
+        try:
+            analysis = self.db.query(Analysis).filter(
+                Analysis.id == analysis_id,
+                Analysis.reviewer_id == reviewer_id
+            ).first()
+            
+            if not analysis:
+                raise Exception(f"Analysis with id {analysis_id} not found or not assigned to reviewer {reviewer_id}")
+            
+            analysis.review_comments = comments
+            analysis.review_status = 'reviewed'
+            analysis.status = 'approved' if approved else 'rejected'
+            analysis.review_date = datetime.utcnow()
+            
+            self.db.commit()
+        except Exception as e:
+            self.db.rollback()
+            raise Exception(f"Error submitting review: {str(e)}")
     
     def _parse_ai_response(self, response: str) -> Dict:
         """
         Parse the AI response into structured data dictionary information
         """
-        # This is a placeholder for the actual parsing logic
-        # You would implement more sophisticated parsing here
-        return {
-            "tables": [],
-            "columns": [],
-            "relationships": [],
-            "data_types": []
-        }
+        try:
+            # Parse the response into a structured format
+            analysis_data = {
+                "tables": [],
+                "relationships": [],
+                "code_snippets": [],
+                "data_sources": [],
+                "data_transformations": [],
+                "potential_reuse_opportunities": [],
+                "documentation_summary": ""
+            }
+            
+            # Add actual parsing logic here based on the AI response format
+            # This is a placeholder - implement proper parsing based on your AI model's output
+            
+            return analysis_data
+        except Exception as e:
+            raise Exception(f"Error parsing AI response: {str(e)}")
     
     def extract_code_structure(self, code: str) -> Dict:
         """
