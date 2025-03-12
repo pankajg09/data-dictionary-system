@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 import jwt
 from passlib.context import CryptContext
 
-from ...core.database import get_db
-from ...models.base import User
+from core.database import get_db
+from models.base import User
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
