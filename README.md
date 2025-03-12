@@ -104,7 +104,7 @@ The system supports various configuration options:
 
 ## 📝 License
 
-Copyright © 2024 Pankaj Gupta. All rights reserved.
+Copyright © 2024 Pankaj Goyal. All rights reserved.
 
 ## 🤝 Contributing
 
