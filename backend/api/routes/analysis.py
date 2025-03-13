@@ -1,9 +1,10 @@
 from fastapi import APIRouter, UploadFile, Form, HTTPException, Depends, Body
 from typing import Optional, Dict
-import openai
+from openai import OpenAI
 from sqlalchemy.orm import Session
 from core.database import get_db
 from services.ai.analysis_service import AnalysisService
+from models.base import Analysis, DataDictionary, CodeSnippet, QueryExecution
 import os
 from dotenv import load_dotenv
 import json
@@ -15,12 +16,12 @@ load_dotenv()
 router = APIRouter()
 
 # Configure OpenAI
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def analyze_code_with_llm(code: str) -> dict:
     """Analyze code using OpenAI's GPT model."""
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a code analysis expert. Analyze the provided code and extract information about database tables, relationships, and important code snippets. Format your response as JSON with the following structure: {tables: [{name: string, fields: [{name: string, type: string, description: string}]}], relationships: [{from_table: string, to_table: string, type: string}], code_snippets: [{file: string, line: number, code: string, description: string}]}"},
@@ -53,14 +54,48 @@ async def analyze_code(
         else:
             raise HTTPException(status_code=400, detail="No code provided")
 
-        analysis_service = AnalysisService(db, openai)
+        analysis_service = AnalysisService(db, client)
+        
+        # First, create or update the analysis
         analysis_result = await analysis_service.analyze_code(
             code_to_analyze, 
             analysis_id=analysis_id,
             user_id=user_id
         )
         
-        return analysis_result
+        # Then create data dictionary entries
+        data_dictionaries = await analysis_service.create_data_dictionary(
+            analysis_result["analysis_id"],
+            code_to_analyze
+        )
+        
+        # Get stored code chunks
+        code_chunks = db.query(CodeSnippet).filter(
+            CodeSnippet.analysis_id == analysis_result["analysis_id"]
+        ).all()
+        
+        # Combine all results
+        return {
+            **analysis_result,
+            "data_dictionaries": [
+                {
+                    "table_name": dd.table_name,
+                    "column_name": dd.column_name,
+                    "data_type": dd.data_type,
+                    "description": dd.description,
+                    "valid_values": dd.valid_values,
+                    "relationships": dd.relationships
+                } for dd in data_dictionaries
+            ],
+            "code_chunks": [
+                {
+                    "code": chunk.code,
+                    "language": chunk.language,
+                    "purpose": chunk.purpose,
+                    "dependencies": chunk.dependencies
+                } for chunk in code_chunks
+            ]
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -72,7 +107,7 @@ async def submit_for_review(
     db: Session = Depends(get_db)
 ):
     try:
-        analysis_service = AnalysisService(db, openai)
+        analysis_service = AnalysisService(db, client)
         await analysis_service.submit_for_review(analysis_id, reviewer_id)
         return {"message": "Analysis submitted for review successfully"}
     except Exception as e:
@@ -87,7 +122,7 @@ async def submit_review(
     db: Session = Depends(get_db)
 ):
     try:
-        analysis_service = AnalysisService(db, openai)
+        analysis_service = AnalysisService(db, client)
         await analysis_service.submit_review(analysis_id, reviewer_id, comments, approved)
         return {"message": "Review submitted successfully"}
     except Exception as e:
@@ -177,3 +212,118 @@ async def get_user_query_stats(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/analyses")
+async def get_analyses(
+    user_id: Optional[int] = None,
+    db: Session = Depends(get_db)
+):
+    """Get all analyses with optional user filter"""
+    try:
+        query = db.query(Analysis)
+        if user_id:
+            query = query.filter(Analysis.analyst_id == user_id)
+            
+        analyses = query.order_by(Analysis.created_at.desc()).all()
+        
+        return [{
+            "id": analysis.id,
+            "title": analysis.title,
+            "description": analysis.description,
+            "status": analysis.status,
+            "review_status": analysis.review_status,
+            "analysis_results": analysis.analysis_results,
+            "review_comments": analysis.review_comments,
+            "created_at": analysis.created_at,
+            "updated_at": analysis.updated_at,
+            "review_date": analysis.review_date,
+            "analyst_id": analysis.analyst_id
+        } for analysis in analyses]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/analyze/sql")
+async def analyze_sql(
+    code: str = Body(...),
+    user_id: Optional[int] = Body(None),
+    language: str = Body("sql"),  # Default to SQL, but can be "python" or "sql"
+    db: Session = Depends(get_db)
+):
+    """
+    Analyze SQL or Python code and extract data dictionary information
+    """
+    try:
+        # Create an analysis record
+        analysis = Analysis(
+            title=f"Code Analysis {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            description="Automated code analysis",
+            analyst_id=user_id if user_id else 1,  # Default to user 1 if not provided
+            status="draft",
+            analysis_results={
+                "tables": [],
+                "relationships": [],
+                "code_snippets": [],
+                "data_sources": [],
+                "data_transformations": [],
+                "potential_reuse_opportunities": [],
+                "documentation_summary": "",
+                "model_used": "Gemini 1.5 Pro"  # Default model
+            }
+        )
+        db.add(analysis)
+        db.commit()
+        db.refresh(analysis)
+        
+        # Use the appropriate analysis method based on language
+        if language.lower() == "sql":
+            from services.ai.analysis_service import analyze_sql_with_llm
+            result = analyze_sql_with_llm(code)
+        else:
+            # For Python or other languages
+            analysis_service = AnalysisService(db, client)
+            result = await analysis_service.analyze_code_with_llm(code)
+        
+        # Update the analysis record with the results
+        analysis.analysis_results = result
+        db.commit()
+        
+        # Create data dictionary entries if tables were found
+        if "tables" in result and result["tables"]:
+            for table in result["tables"]:
+                table_name = table["name"]
+                for column in table.get("columns", []):
+                    dd_entry = DataDictionary(
+                        analysis_id=analysis.id,
+                        table_name=table_name,
+                        column_name=column["name"],
+                        data_type=column["type"],
+                        description=column["description"],
+                        valid_values=None,
+                        relationships=None,
+                        source="auto",
+                        version="1.0"
+                    )
+                    db.add(dd_entry)
+            
+            # Add relationships if any
+            if "relationships" in result and result["relationships"]:
+                for rel in result["relationships"]:
+                    # Find the data dictionary entry for the from_column
+                    from_dd = db.query(DataDictionary).filter(
+                        DataDictionary.analysis_id == analysis.id,
+                        DataDictionary.table_name == rel["from_table"],
+                        DataDictionary.column_name == rel["from_column"]
+                    ).first()
+                    
+                    if from_dd:
+                        from_dd.relationships = [f"{rel['to_table']}.{rel['to_column']}"]
+            
+            db.commit()
+        
+        return {
+            "analysis_id": analysis.id,
+            "result": result
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error analyzing code: {str(e)}")

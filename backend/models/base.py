@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum, JSON
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum, JSON, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
@@ -10,11 +10,14 @@ class User(Base):
     __tablename__ = 'users'
     
     id = Column(Integer, primary_key=True)
-    username = Column(String, unique=True, nullable=False)
-    email = Column(String, unique=True, nullable=False)
-    password_hash = Column(String, nullable=False)
-    role = Column(String, nullable=False)  # admin, analyst, reviewer
-    qualifications = Column(JSON)
+    google_id = Column(String(255), unique=True, nullable=True)
+    email = Column(String(255), unique=True, nullable=False)
+    name = Column(String(255), nullable=False)
+    picture = Column(Text, nullable=True)  # Changed to match frontend
+    role = Column(String(20), nullable=False, default='user')
+    first_login_at = Column(DateTime, nullable=True)
+    last_login_at = Column(DateTime, nullable=True)
+    login_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -102,4 +105,48 @@ class QueryExecution(Base):
     execution_duration = Column(Integer)  # in milliseconds
     
     user = relationship("User", backref="query_executions")
-    analysis = relationship("Analysis", backref="query_executions") 
+    analysis = relationship("Analysis", backref="query_executions")
+
+# Models for database management
+class Database(Base):
+    __tablename__ = 'databases'
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False, unique=True)
+    description = Column(String)
+    connection_string = Column(String)
+    db_type = Column(String)  # sqlite, mysql, postgresql, etc.
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    tables = relationship("Table", back_populates="database", cascade="all, delete-orphan")
+
+class Table(Base):
+    __tablename__ = 'db_tables'
+    
+    id = Column(Integer, primary_key=True)
+    database_id = Column(Integer, ForeignKey('databases.id'), nullable=False)
+    name = Column(String, nullable=False)
+    description = Column(String)
+    row_count = Column(Integer)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    database = relationship("Database", back_populates="tables")
+    columns = relationship("Column", back_populates="table", cascade="all, delete-orphan")
+
+class Column(Base):
+    __tablename__ = 'db_columns'
+    
+    id = Column(Integer, primary_key=True)
+    table_id = Column(Integer, ForeignKey('db_tables.id'), nullable=False)
+    name = Column(String, nullable=False)
+    data_type = Column(String, nullable=False)
+    description = Column(String)
+    is_primary_key = Column(Integer, default=0)
+    is_nullable = Column(Integer, default=1)
+    default_value = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    table = relationship("Table", back_populates="columns") 

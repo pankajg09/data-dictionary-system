@@ -12,11 +12,22 @@ import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 
-from core.database import get_db
-from models.base import Analysis, QueryExecution
+from core.database import get_db, init_db
+from models.base import Base, Analysis, QueryExecution
 from services.ai.analysis_service import AnalysisService
+from api.routes import analysis, dictionary, databases
+from routes.config import router as config_router
+from routes.auth import router as auth_router
+from routes.dashboard import router as dashboard_router
 
 load_dotenv()
+
+# Initialize database tables
+try:
+    init_db()
+except Exception as e:
+    print(f"Failed to initialize database: {str(e)}")
+    raise
 
 app = FastAPI(
     title="Data Dictionary System",
@@ -27,18 +38,21 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:3002",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:3002"
-    ],  # Frontend URLs
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600
 )
+
+# Mount the routers
+app.include_router(analysis.router, prefix="/api")
+app.include_router(dictionary.router, prefix="/api")
+app.include_router(databases.router)
+app.include_router(config_router, prefix="/api")
+app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+app.include_router(dashboard_router, prefix="/api")
 
 # Configure OpenAI client
 openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -323,7 +337,7 @@ async def get_user_query_stats(
 
 @app.get("/")
 async def root():
-    return {"message": "Data Dictionary System API"}
+    return {"message": "Welcome to Data Dictionary System API"}
 
 @app.get("/health")
 async def health_check(db: Session = Depends(get_db)):
