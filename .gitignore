@@ -8,6 +8,12 @@ venv/
 ENV/
 *.db
 
+# Environment variables
+.env
+.env.*
+*.env
+*.env.*
+
 # Node.js
 node_modules/
 npm-debug.log*
