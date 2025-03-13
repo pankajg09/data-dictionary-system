@@ -18,6 +18,7 @@ from services.ai.analysis_service import AnalysisService
 from api.routes import analysis, dictionary, databases
 from routes.config import router as config_router
 from routes.auth import router as auth_router
+from routes.dashboard import router as dashboard_router
 
 load_dotenv()
 
@@ -47,10 +48,11 @@ app.add_middleware(
 
 # Mount the routers
 app.include_router(analysis.router, prefix="/api")
-app.include_router(dictionary.router, prefix="/api/dictionary")
-app.include_router(databases.router, prefix="/api")
-app.include_router(config_router, prefix="/api/config", tags=["config"])
+app.include_router(dictionary.router, prefix="/api")
+app.include_router(databases.router)
+app.include_router(config_router, prefix="/api")
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+app.include_router(dashboard_router, prefix="/api")
 
 # Configure OpenAI client
 openai_api_key = os.getenv("OPENAI_API_KEY")

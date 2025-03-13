@@ -10,8 +10,9 @@ from openai import OpenAI
 import re
 from pydantic import BaseModel
 from services.ai.analysis_service import AnalysisService
+from sqlalchemy import create_engine, text
 
-router = APIRouter()
+router = APIRouter(prefix="/api/databases", tags=["databases"])
 
 # Configure OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -161,227 +162,154 @@ def parse_sql_manually(sql_code: str) -> Dict[str, Any]:
         "relationships": relationships
     }
 
-@router.get("/databases")
-async def get_databases(db: Session = Depends(get_db)):
-    """
-    Get a list of all databases with their tables and sample data
-    """
+# Function to initialize sample databases
+def init_sample_databases():
     try:
-        # For demonstration, we'll use SQLite database files in a 'databases' directory
-        # In a real application, you would use your database connection configuration
-        databases_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "databases")
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        db_dir = os.path.join(backend_dir, "sample_dbs")
+        os.makedirs(db_dir, exist_ok=True)
         
-        # Create the directory if it doesn't exist
-        os.makedirs(databases_dir, exist_ok=True)
+        # List of sample databases and their SQL files
+        sample_dbs = {
+            "inventory": "inventory.sql",
+            "sample": "sample.sql",
+            "users": "users.sql"
+        }
         
-        # Get all .db files in the directory
-        db_files = [f for f in os.listdir(databases_dir) if f.endswith('.db')]
-        
-        databases = []
-        
-        # If no database files found, return the main application database
-        if not db_files:
-            # Get the main database information
-            main_db = {
-                "name": "Main Database",
-                "description": "Primary application database",
-                "tables": []
-            }
+        # Initialize each database
+        for db_name, sql_file in sample_dbs.items():
+            db_path = os.path.join(db_dir, f"{db_name}.db")
+            sql_file_path = os.path.join(backend_dir, "databases", sql_file)
             
-            # Get all table names from SQLAlchemy metadata
-            from sqlalchemy import inspect
-            inspector = inspect(db.bind)
-            table_names = inspector.get_table_names()
-            
-            for table_name in table_names:
-                # Get column information
-                columns = []
-                for column in inspector.get_columns(table_name):
-                    columns.append({
-                        "name": column["name"],
-                        "type": str(column["type"]),
-                        "description": ""
-                    })
+            if not os.path.exists(sql_file_path):
+                print(f"SQL file not found: {sql_file_path}")
+                continue
                 
-                # Get sample data (first 10 rows)
-                rows = []
-                try:
-                    result = db.execute(f"SELECT * FROM {table_name} LIMIT 10")
-                    rows = [dict(row) for row in result]
-                except Exception as e:
-                    print(f"Error fetching rows for table {table_name}: {str(e)}")
-                
-                # Get row count
-                row_count = 0
-                try:
-                    result = db.execute(f"SELECT COUNT(*) FROM {table_name}")
-                    row_count = result.scalar()
-                except Exception as e:
-                    print(f"Error getting row count for table {table_name}: {str(e)}")
-                
-                main_db["tables"].append({
-                    "name": table_name,
-                    "columns": columns,
-                    "rows": rows,
-                    "rowCount": row_count
-                })
-            
-            databases.append(main_db)
-            return databases
-        
-        # Process each database file
-        for db_file in db_files:
-            db_path = os.path.join(databases_dir, db_file)
-            db_name = os.path.splitext(db_file)[0]
-            
-            database = {
-                "name": db_name,
-                "description": f"SQLite database: {db_file}",
-                "tables": []
-            }
-            
-            try:
-                # Connect to the SQLite database
+            if not os.path.exists(db_path):
+                print(f"Creating database: {db_path}")
                 conn = sqlite3.connect(db_path)
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
+                with open(sql_file_path) as f:
+                    sql_content = f.read()
+                    try:
+                        conn.executescript(sql_content)
+                        conn.commit()
+                        print(f"Successfully initialized {db_name} database schema")
+                        
+                        # Populate with sample data if it's not the users database
+                        if db_name != "users":
+                            populate_sql_path = os.path.join(backend_dir, "databases", "populate_data.sql")
+                            if os.path.exists(populate_sql_path):
+                                with open(populate_sql_path) as pf:
+                                    populate_content = pf.read()
+                                    try:
+                                        conn.executescript(populate_content)
+                                        conn.commit()
+                                        print(f"Successfully populated {db_name} database with sample data")
+                                    except sqlite3.Error as e:
+                                        print(f"Error populating {db_name} database: {str(e)}")
+                            else:
+                                print(f"Sample data SQL file not found: {populate_sql_path}")
+                    except sqlite3.Error as e:
+                        print(f"Error initializing {db_name} database: {str(e)}")
+                conn.close()
+            else:
+                print(f"Database already exists: {db_path}")
                 
+                # Repopulate existing databases with fresh data if they're not the users database
+                if db_name != "users":
+                    conn = sqlite3.connect(db_path)
+                    populate_sql_path = os.path.join(backend_dir, "databases", "populate_data.sql")
+                    if os.path.exists(populate_sql_path):
+                        with open(populate_sql_path) as pf:
+                            populate_content = pf.read()
+                            try:
+                                conn.executescript(populate_content)
+                                conn.commit()
+                                print(f"Successfully repopulated {db_name} database with fresh sample data")
+                            except sqlite3.Error as e:
+                                print(f"Error repopulating {db_name} database: {str(e)}")
+                    conn.close()
+    except Exception as e:
+        print(f"Error in init_sample_databases: {str(e)}")
+
+@router.get("")
+def get_databases():
+    # Initialize sample databases if they don't exist
+    init_sample_databases()
+    
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    db_dir = os.path.join(backend_dir, "sample_dbs")
+    
+    databases = []
+    
+    # Add sample databases
+    sample_dbs = ["inventory", "sample", "users"]
+    for db_name in sample_dbs:
+        db_path = os.path.join(db_dir, f"{db_name}.db")
+        if os.path.exists(db_path):
+            engine = create_engine(f"sqlite:///{db_path}")
+            with engine.connect() as conn:
                 # Get all table names
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-                table_names = [row[0] for row in cursor.fetchall()]
-                
-                for table_name in table_names:
-                    # Skip SQLite system tables
-                    if table_name.startswith('sqlite_'):
-                        continue
-                    
+                tables = []
+                result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
+                for row in result:
+                    table_name = row[0]
                     # Get column information
-                    cursor.execute(f"PRAGMA table_info({table_name})")
                     columns = []
-                    for col in cursor.fetchall():
+                    col_result = conn.execute(text(f"PRAGMA table_info({table_name})"))
+                    for col in col_result:
                         columns.append({
-                            "name": col["name"],
-                            "type": col["type"],
-                            "description": ""
+                            "name": col[1],
+                            "type": col[2],
+                            "nullable": not col[3],
+                            "primary_key": bool(col[5])
                         })
                     
-                    # Get sample data (first 10 rows)
-                    cursor.execute(f"SELECT * FROM {table_name} LIMIT 10")
-                    rows = [dict(row) for row in cursor.fetchall()]
-                    
                     # Get row count
-                    cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
-                    row_count = cursor.fetchone()[0]
+                    count_result = conn.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
+                    row_count = count_result.scalar()
                     
-                    database["tables"].append({
+                    tables.append({
                         "name": table_name,
                         "columns": columns,
-                        "rows": rows,
-                        "rowCount": row_count
+                        "row_count": row_count
                     })
-                
-                conn.close()
-            except Exception as e:
-                print(f"Error processing database {db_file}: {str(e)}")
-                database["description"] = f"Error: {str(e)}"
             
-            databases.append(database)
-        
-        return databases
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching databases: {str(e)}")
-
-@router.get("/databases/{db_name}/tables/{table_name}")
-async def get_table_data(db_name: str, table_name: str, limit: int = 100, offset: int = 0, db: Session = Depends(get_db)):
-    """
-    Get detailed data for a specific table
-    """
-    try:
-        # For the main database
-        if db_name == "main":
-            # Get column information
-            from sqlalchemy import inspect
-            inspector = inspect(db.bind)
-            
-            if table_name not in inspector.get_table_names():
-                raise HTTPException(status_code=404, detail=f"Table {table_name} not found")
-            
-            columns = []
-            for column in inspector.get_columns(table_name):
-                columns.append({
-                    "name": column["name"],
-                    "type": str(column["type"]),
-                    "description": ""
-                })
-            
-            # Get data with pagination
-            result = db.execute(f"SELECT * FROM {table_name} LIMIT {limit} OFFSET {offset}")
-            rows = [dict(row) for row in result]
-            
-            # Get total row count
-            result = db.execute(f"SELECT COUNT(*) FROM {table_name}")
-            total_rows = result.scalar()
-            
-            return {
-                "name": table_name,
-                "columns": columns,
-                "rows": rows,
-                "totalRows": total_rows,
-                "limit": limit,
-                "offset": offset
-            }
-        
-        # For other SQLite databases
-        databases_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "databases")
-        db_path = os.path.join(databases_dir, f"{db_name}.db")
-        
-        if not os.path.exists(db_path):
-            raise HTTPException(status_code=404, detail=f"Database {db_name} not found")
-        
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        # Check if table exists
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
-        if not cursor.fetchone():
-            conn.close()
-            raise HTTPException(status_code=404, detail=f"Table {table_name} not found in database {db_name}")
-        
-        # Get column information
-        cursor.execute(f"PRAGMA table_info({table_name})")
-        columns = []
-        for col in cursor.fetchall():
-            columns.append({
-                "name": col["name"],
-                "type": col["type"],
-                "description": ""
+            databases.append({
+                "name": db_name,
+                "tables": tables
             })
+    
+    return databases
+
+@router.get("/{database_name}/tables/{table_name}")
+def get_table_data(database_name: str, table_name: str, page: int = 1, page_size: int = 10):
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    db_path = os.path.join(backend_dir, "sample_dbs", f"{database_name}.db")
+    
+    if not os.path.exists(db_path):
+        raise HTTPException(status_code=404, detail="Database not found")
+    
+    engine = create_engine(f"sqlite:///{db_path}")
+    with engine.connect() as conn:
+        # Get total count
+        count_result = conn.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
+        total_count = count_result.scalar()
         
-        # Get data with pagination
-        cursor.execute(f"SELECT * FROM {table_name} LIMIT {limit} OFFSET {offset}")
-        rows = [dict(row) for row in cursor.fetchall()]
-        
-        # Get total row count
-        cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
-        total_rows = cursor.fetchone()[0]
-        
-        conn.close()
+        # Get paginated data
+        offset = (page - 1) * page_size
+        result = conn.execute(text(f"SELECT * FROM {table_name} LIMIT {page_size} OFFSET {offset}"))
+        columns = result.keys()
+        rows = [dict(zip(columns, row)) for row in result]
         
         return {
-            "name": table_name,
-            "columns": columns,
-            "rows": rows,
-            "totalRows": total_rows,
-            "limit": limit,
-            "offset": offset
+            "total": total_count,
+            "page": page,
+            "page_size": page_size,
+            "data": rows
         }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching table data: {str(e)}")
 
-@router.post("/databases/analyze-sql")
+@router.post("/analyze-sql")
 async def analyze_sql(request: SQLAnalysisRequest, db: Session = Depends(get_db)):
     """
     Analyze SQL code using LLM to extract schema information
@@ -393,9 +321,8 @@ async def analyze_sql(request: SQLAnalysisRequest, db: Session = Depends(get_db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error analyzing code: {str(e)}")
 
-@router.post("/databases/{db_name}/execute-sql")
+@router.post("/execute-sql")
 async def execute_sql(
-    db_name: str,
     sql_query: str = Body(...),
     user_id: Optional[int] = Body(None),
     db: Session = Depends(get_db)
@@ -406,10 +333,10 @@ async def execute_sql(
     try:
         # For SQLite databases
         databases_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "databases")
-        db_path = os.path.join(databases_dir, f"{db_name}.db")
+        db_path = os.path.join(databases_dir, "main.db")
         
         if not os.path.exists(db_path):
-            raise HTTPException(status_code=404, detail=f"Database {db_name} not found")
+            raise HTTPException(status_code=404, detail=f"Database not found")
         
         # Connect to the database
         conn = sqlite3.connect(db_path)

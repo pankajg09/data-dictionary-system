@@ -157,38 +157,31 @@ async def google_login(
         
         if not user:
             # Create new user
-            now = datetime.utcnow()
             user = User(
                 email=request.email,
                 name=request.name,
                 picture=request.picture,
                 role="user",
-                google_id=request.token,
-                first_login_at=now,
-                last_login_at=now,
-                login_count=1,
-                created_at=now,
-                updated_at=now
+                google_id=request.token,  # Using token as google_id for now
+                first_login_at=datetime.utcnow(),
+                last_login_at=datetime.utcnow(),
+                login_count=1
             )
             db.add(user)
             db.commit()
             db.refresh(user)
         else:
             # Update existing user
-            now = datetime.utcnow()
-            user.last_login_at = now
+            user.last_login_at = datetime.utcnow()
             user.login_count += 1
-            user.updated_at = now
             if request.picture:
                 user.picture = request.picture
-            if user.first_login_at is None:
-                user.first_login_at = now
             db.commit()
             db.refresh(user)
         
         # Create access token
         access_token = create_access_token(
-            data={"sub": str(user.id)},
+            data={"sub": user.email},
             expires_delta=timedelta(minutes=1440)  # 24 hours
         )
         
@@ -200,8 +193,7 @@ async def google_login(
                 "email": user.email,
                 "name": user.name,
                 "picture": user.picture,
-                "role": user.role,
-                "login_count": user.login_count
+                "role": user.role
             }
         }
     except Exception as e:

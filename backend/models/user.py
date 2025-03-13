@@ -58,10 +58,4 @@ class UserResponse(UserBase):
     updated_at: datetime
 
     class Config:
-        orm_mode = True
-
-class UserUpdate(BaseModel):
-    email: Optional[str] = None
-    name: Optional[str] = None
-    picture: Optional[str] = None
-    role: Optional[str] = None 
+        from_attributes = True 
