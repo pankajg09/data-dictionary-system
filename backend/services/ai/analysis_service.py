@@ -1,11 +1,13 @@
 import ast
 import re
+import os
+import json
 from typing import Dict, List, Optional
 from openai import OpenAI
 from sqlalchemy.orm import Session
 from datetime import datetime, time
 
-from ...models.base import Analysis, DataDictionary, CodeSnippet, QueryExecution
+from models.base import Analysis, DataDictionary, CodeSnippet, QueryExecution
 
 class AnalysisService:
     def __init__(self, db_session: Session, openai_client: OpenAI):
@@ -14,41 +16,75 @@ class AnalysisService:
         
     async def analyze_code(self, code: str, analysis_id: Optional[int] = None, user_id: Optional[int] = None) -> Dict:
         """
-        Analyze code using OpenAI to extract data dictionary information and optionally store results
+        Analyze code using OpenAI or Gemini to extract data dictionary information and optionally store results
         """
         start_time = datetime.utcnow()
         execution_status = "success"
         error_message = None
         
         try:
-            response = await self.ai.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "You are a code analysis expert. Extract data-related information from the code."},
-                    {"role": "user", "content": f"Analyze this code and extract information about data structures, types, and relationships:\n\n{code}"}
-                ]
-            )
+            # Try OpenAI first
+            try:
+                response = await self.ai.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": "You are a code analysis expert. Extract data-related information from the code."},
+                        {"role": "user", "content": f"Analyze this code and extract information about data structures, types, and relationships:\n\n{code}"}
+                    ]
+                )
+                analysis_result = self._parse_ai_response(response.choices[0].message.content)
+            except Exception as openai_error:
+                print(f"OpenAI analysis failed: {str(openai_error)}, trying Gemini...")
+                # Try Gemini as fallback
+                try:
+                    import google.generativeai as genai
+                    genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    response = model.generate_content(
+                        f"Analyze this code and extract information about data structures, types, and relationships:\n\n{code}"
+                    )
+                    analysis_result = self._parse_ai_response(response.text)
+                except Exception as gemini_error:
+                    raise Exception(f"Both OpenAI and Gemini analysis failed. OpenAI error: {str(openai_error)}, Gemini error: {str(gemini_error)}")
             
-            analysis_result = self._parse_ai_response(response.choices[0].message.content)
-            
-            # If analysis_id is provided, store the results
-            if analysis_id:
+            # Create a new analysis if analysis_id is not provided
+            if not analysis_id and user_id:
+                new_analysis = Analysis(
+                    title=f"Code Analysis {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}",
+                    description="Automated code analysis",
+                    analyst_id=user_id,
+                    status="draft",
+                    analysis_results=analysis_result
+                )
+                self.db.add(new_analysis)
+                try:
+                    self.db.commit()
+                    self.db.refresh(new_analysis)
+                    analysis_id = new_analysis.id
+                except Exception as e:
+                    self.db.rollback()
+                    raise Exception(f"Error creating new analysis: {str(e)}")
+            # If analysis_id is provided, update existing analysis
+            elif analysis_id:
                 await self.store_analysis_results(analysis_id, analysis_result)
             
-            return analysis_result
+            return {
+                "analysis_id": analysis_id,
+                "results": analysis_result
+            }
         except Exception as e:
             execution_status = "failed"
             error_message = str(e)
             raise Exception(f"Error analyzing code: {str(e)}")
         finally:
-            if analysis_id and user_id:
+            if user_id:
                 end_time = datetime.utcnow()
                 duration = int((end_time - start_time).total_seconds() * 1000)  # Convert to milliseconds
                 
                 # Record query execution
                 query_execution = QueryExecution(
                     user_id=user_id,
-                    analysis_id=analysis_id,
+                    analysis_id=analysis_id if analysis_id else None,
                     query_content=code[:1000],  # Store first 1000 characters of the query
                     execution_status=execution_status,
                     error_message=error_message,
@@ -124,7 +160,23 @@ class AnalysisService:
         Parse the AI response into structured data dictionary information
         """
         try:
-            # Parse the response into a structured format
+            # Try to parse the response as JSON first
+            try:
+                parsed_data = json.loads(response)
+                if isinstance(parsed_data, dict):
+                    return {
+                        "tables": parsed_data.get("tables", []),
+                        "relationships": parsed_data.get("relationships", []),
+                        "code_snippets": parsed_data.get("code_snippets", []),
+                        "data_sources": parsed_data.get("data_sources", []),
+                        "data_transformations": parsed_data.get("data_transformations", []),
+                        "potential_reuse_opportunities": parsed_data.get("potential_reuse_opportunities", []),
+                        "documentation_summary": parsed_data.get("documentation_summary", "")
+                    }
+            except json.JSONDecodeError:
+                pass
+
+            # If JSON parsing fails, try to extract information using regex
             analysis_data = {
                 "tables": [],
                 "relationships": [],
@@ -134,11 +186,52 @@ class AnalysisService:
                 "potential_reuse_opportunities": [],
                 "documentation_summary": ""
             }
-            
-            # Add actual parsing logic here based on the AI response format
-            # This is a placeholder - implement proper parsing based on your AI model's output
-            
+
+            # Extract tables and their fields
+            table_pattern = r"(?:Table|Class)\s+(\w+)[\s\n]*{([^}]+)}"
+            for match in re.finditer(table_pattern, response, re.MULTILINE):
+                table_name = match.group(1)
+                fields_text = match.group(2)
+                fields = []
+                for field_line in fields_text.split('\n'):
+                    if ':' in field_line:
+                        field_name, field_type = field_line.split(':', 1)
+                        fields.append({
+                            "name": field_name.strip(),
+                            "type": field_type.strip(),
+                            "description": ""
+                        })
+                analysis_data["tables"].append({
+                    "name": table_name,
+                    "fields": fields
+                })
+
+            # Extract relationships
+            rel_pattern = r"(?:Relationship|Foreign Key):\s*(\w+)\s*->\s*(\w+)"
+            for match in re.finditer(rel_pattern, response, re.MULTILINE):
+                analysis_data["relationships"].append({
+                    "from_table": match.group(1),
+                    "to_table": match.group(2),
+                    "type": "foreign_key"
+                })
+
+            # Extract code snippets
+            code_pattern = r"```(?:\w+)?\n(.*?)```"
+            for match in re.finditer(code_pattern, response, re.DOTALL):
+                analysis_data["code_snippets"].append({
+                    "code": match.group(1).strip(),
+                    "language": "python",  # Default to python
+                    "description": ""
+                })
+
+            # Extract documentation summary
+            summary_pattern = r"(?:Summary|Documentation):(.*?)(?:\n\n|\Z)"
+            summary_match = re.search(summary_pattern, response, re.DOTALL)
+            if summary_match:
+                analysis_data["documentation_summary"] = summary_match.group(1).strip()
+
             return analysis_data
+
         except Exception as e:
             raise Exception(f"Error parsing AI response: {str(e)}")
     

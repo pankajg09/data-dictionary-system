@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, Form, HTTPException
+from fastapi import FastAPI, UploadFile, Form, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, List, Dict
 from openai import OpenAI, OpenAIError
@@ -9,6 +9,12 @@ import json
 import ast
 import re
 import datetime
+from sqlalchemy.orm import Session
+from sqlalchemy import func, text
+
+from core.database import get_db
+from models.base import Analysis, QueryExecution
+from services.ai.analysis_service import AnalysisService
 
 load_dotenv()
 
@@ -40,8 +46,11 @@ openai_client = None
 if openai_api_key:
     try:
         openai_client = OpenAI(api_key=openai_api_key)
+        print(f"OpenAI client initialized successfully")
     except Exception as e:
         print(f"Failed to initialize OpenAI client: {str(e)}")
+else:
+    print("OpenAI API key not found in environment variables")
 
 # Configure Gemini client
 google_api_key = os.getenv("GOOGLE_API_KEY")
@@ -220,14 +229,18 @@ async def analyze_code_with_llm(code: str, code_info: dict) -> dict:
         detail=f"LLM analysis failed with both services: {'; '.join(errors)}"
     )
 
-@app.post("/api/analysis/analyze")
+@app.post("/analyze")
 async def analyze_code(
     file: Optional[UploadFile] = None,
     code: Optional[str] = Form(None),
-    title: Optional[str] = Form(None),
-    description: Optional[str] = Form(None)
+    user_id: int = Form(...),
+    analysis_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db)
 ):
     try:
+        if not openai_client:
+            raise HTTPException(status_code=500, detail="OpenAI client not initialized")
+
         if file:
             content = await file.read()
             code_to_analyze = content.decode()
@@ -236,46 +249,104 @@ async def analyze_code(
         else:
             raise HTTPException(status_code=400, detail="No code provided")
 
-        # Check if any API key is configured
-        if not openai_api_key and not google_api_key:
-            raise HTTPException(
-                status_code=500, 
-                detail="No API keys configured. Please set either OPENAI_API_KEY or GOOGLE_API_KEY environment variable"
-            )
-
-        try:
-            # Extract basic code information
-            code_info = extract_code_info(code_to_analyze)
-            if "error" in code_info:
-                raise HTTPException(status_code=400, detail=code_info["error"])
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid code format: {str(e)}")
+        analysis_service = AnalysisService(db, openai_client)
+        analysis_result = await analysis_service.analyze_code(
+            code_to_analyze,
+            analysis_id=analysis_id,
+            user_id=user_id
+        )
         
-        try:
-            # Perform LLM analysis with fallback
-            analysis_result = await analyze_code_with_llm(code_to_analyze, code_info)
-            
-            # Add metadata
-            analysis_result["metadata"] = {
-                "title": title or "Untitled Analysis",
-                "description": description or "No description provided",
-                "timestamp": datetime.datetime.utcnow().isoformat(),
-                "version": "1.0",
-                "status": "pending_review"
-            }
-            
-            return analysis_result
-            
-        except HTTPException as he:
-            raise he
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+        return analysis_result
 
-    except HTTPException as he:
-        raise he
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/query-executions")
+async def get_query_executions(
+    user_id: Optional[int] = None,
+    analysis_id: Optional[int] = None,
+    db: Session = Depends(get_db)
+):
+    """Get query execution history with optional filters"""
+    try:
+        query = db.query(QueryExecution)
+        
+        if user_id:
+            query = query.filter(QueryExecution.user_id == user_id)
+        if analysis_id:
+            query = query.filter(QueryExecution.analysis_id == analysis_id)
+            
+        executions = query.order_by(QueryExecution.execution_time.desc()).all()
+        
+        return [{
+            "id": exe.id,
+            "user_id": exe.user_id,
+            "analysis_id": exe.analysis_id,
+            "execution_time": exe.execution_time,
+            "execution_status": exe.execution_status,
+            "execution_duration": exe.execution_duration,
+            "error_message": exe.error_message
+        } for exe in executions]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/user/{user_id}/query-stats")
+async def get_user_query_stats(
+    user_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get query execution statistics for a user"""
+    try:
+        total_queries = db.query(QueryExecution).filter(QueryExecution.user_id == user_id).count()
+        successful_queries = db.query(QueryExecution).filter(
+            QueryExecution.user_id == user_id,
+            QueryExecution.execution_status == "success"
+        ).count()
+        failed_queries = db.query(QueryExecution).filter(
+            QueryExecution.user_id == user_id,
+            QueryExecution.execution_status == "failed"
+        ).count()
+        
+        avg_duration = db.query(func.avg(QueryExecution.execution_duration)).filter(
+            QueryExecution.user_id == user_id,
+            QueryExecution.execution_status == "success"
+        ).scalar()
+        
+        return {
+            "total_queries": total_queries,
+            "successful_queries": successful_queries,
+            "failed_queries": failed_queries,
+            "average_duration_ms": round(float(avg_duration or 0), 2)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to Data Dictionary System API"} 
+    return {"message": "Data Dictionary System API"}
+
+@app.get("/health")
+async def health_check(db: Session = Depends(get_db)):
+    """Check the health of the API and database connection"""
+    try:
+        # Test database connection
+        db.execute(text("SELECT 1")).scalar()
+        
+        # Check OpenAI client
+        openai_status = "available" if openai_client else "not configured"
+        
+        # Check Gemini client
+        gemini_status = "available" if google_api_key else "not configured"
+        
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "openai": openai_status,
+            "gemini": gemini_status,
+            "timestamp": datetime.datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Health check failed: {str(e)}"
+        ) 
