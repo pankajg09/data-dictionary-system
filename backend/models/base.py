@@ -59,8 +59,12 @@ class DataDictionary(Base):
     version = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by = Column(Integer, ForeignKey('users.id'), nullable=True)
+    updated_by = Column(Integer, ForeignKey('users.id'), nullable=True)
     
     analysis = relationship("Analysis", back_populates="data_dictionaries")
+    creator = relationship("User", foreign_keys=[created_by])
+    updater = relationship("User", foreign_keys=[updated_by])
 
 class Review(Base):
     __tablename__ = 'reviews'

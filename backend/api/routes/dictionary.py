@@ -5,10 +5,28 @@ from core.database import get_db
 from models.base import DataDictionary, User
 from datetime import datetime
 
-router = APIRouter()
+router = APIRouter(prefix="/dictionary", tags=["dictionary"])
 
 def create_sample_entries(db: Session):
     """Create sample entries if none exist"""
+    # Get the first user or create a system user if none exists
+    system_user = db.query(User).first()
+    if not system_user:
+        system_user = User(
+            email="system@example.com",
+            name="System User",
+            role="system",
+            google_id="system",
+            first_login_at=datetime.utcnow(),
+            last_login_at=datetime.utcnow(),
+            login_count=1,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        db.add(system_user)
+        db.commit()
+        db.refresh(system_user)
+    
     sample_entries = [
         {
             "table_name": "users",
@@ -16,7 +34,8 @@ def create_sample_entries(db: Session):
             "data_type": "INTEGER",
             "description": "Primary key for users table",
             "source": "manual",
-            "version": "1.0"
+            "version": "1.0",
+            "created_by": system_user.id
         },
         {
             "table_name": "users",
@@ -24,7 +43,8 @@ def create_sample_entries(db: Session):
             "data_type": "VARCHAR(255)",
             "description": "User's email address, must be unique",
             "source": "manual",
-            "version": "1.0"
+            "version": "1.0",
+            "created_by": system_user.id
         },
         {
             "table_name": "orders",
@@ -32,7 +52,8 @@ def create_sample_entries(db: Session):
             "data_type": "INTEGER",
             "description": "Primary key for orders table",
             "source": "manual",
-            "version": "1.0"
+            "version": "1.0",
+            "created_by": system_user.id
         },
         {
             "table_name": "orders",
@@ -41,19 +62,61 @@ def create_sample_entries(db: Session):
             "description": "Foreign key reference to users.id",
             "relationships": ["users.id"],
             "source": "manual",
-            "version": "1.0"
+            "version": "1.0",
+            "created_by": system_user.id
         }
     ]
     
-    for entry_data in sample_entries:
-        entry = DataDictionary(**entry_data)
-        db.add(entry)
-    
     try:
+        for entry_data in sample_entries:
+            entry = DataDictionary(**entry_data)
+            db.add(entry)
         db.commit()
     except Exception as e:
         db.rollback()
         print(f"Error creating sample entries: {str(e)}")
+
+@router.get("")
+async def get_all_entries(
+    db: Session = Depends(get_db),
+    user_id: Optional[int] = None,
+    table_name: Optional[str] = None
+):
+    """Get all dictionary entries with optional filters"""
+    # Check if there are any entries, if not create sample entries
+    count = db.query(DataDictionary).count()
+    if count == 0:
+        create_sample_entries(db)
+        db.commit()
+    
+    query = db.query(DataDictionary)
+    
+    if user_id:
+        query = query.filter(DataDictionary.created_by == user_id)
+    
+    if table_name:
+        query = query.filter(DataDictionary.table_name == table_name)
+    
+    entries = query.all()
+    
+    return [
+        {
+            "id": entry.id,
+            "table_name": entry.table_name,
+            "column_name": entry.column_name,
+            "data_type": entry.data_type,
+            "description": entry.description,
+            "valid_values": entry.valid_values,
+            "relationships": entry.relationships,
+            "source": entry.source,
+            "version": entry.version,
+            "created_at": entry.created_at.isoformat() if entry.created_at else None,
+            "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
+            "created_by": entry.created_by,
+            "updated_by": entry.updated_by
+        }
+        for entry in entries
+    ]
 
 @router.get("/entries")
 async def get_entries(
@@ -62,33 +125,7 @@ async def get_entries(
     table_name: Optional[str] = None
 ):
     """Get all dictionary entries with optional filters"""
-    query = db.query(DataDictionary)
-    
-    # Create sample entries if none exist
-    count = query.count()
-    if count == 0:
-        create_sample_entries(db)
-        query = db.query(DataDictionary)  # Refresh query after adding entries
-    
-    if table_name:
-        query = query.filter(DataDictionary.table_name == table_name)
-    
-    entries = query.all()
-    return [{
-        "id": entry.id,
-        "table_name": entry.table_name,
-        "column_name": entry.column_name,
-        "data_type": entry.data_type,
-        "description": entry.description,
-        "valid_values": entry.valid_values,
-        "relationships": entry.relationships,
-        "source": entry.source,
-        "version": entry.version,
-        "created_at": entry.created_at.isoformat() if entry.created_at else None,
-        "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
-        "analysis_id": entry.analysis_id,
-        "created_by": entry.analysis.analyst_id if entry.analysis else None
-    } for entry in entries]
+    return await get_all_entries(db, user_id, table_name)
 
 @router.post("/entries")
 async def create_entry(
@@ -112,7 +149,8 @@ async def create_entry(
             relationships=entry_data.get("relationships"),
             source=entry_data.get("source", "manual"),
             version="1.0",
-            analysis_id=entry_data.get("analysis_id")
+            analysis_id=entry_data.get("analysis_id"),
+            created_by=current_user_id
         )
         db.add(new_entry)
         db.commit()
