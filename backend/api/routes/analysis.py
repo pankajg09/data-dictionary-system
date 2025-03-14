@@ -13,29 +13,10 @@ from sqlalchemy.sql import func
 
 load_dotenv()
 
-router = APIRouter()
+router = APIRouter(prefix="/analysis", tags=["analysis"])
 
 # Configure OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-def analyze_code_with_llm(code: str) -> dict:
-    """Analyze code using OpenAI's GPT model."""
-    try:
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are a code analysis expert. Analyze the provided code and extract information about database tables, relationships, and important code snippets. Format your response as JSON with the following structure: {tables: [{name: string, fields: [{name: string, type: string, description: string}]}], relationships: [{from_table: string, to_table: string, type: string}], code_snippets: [{file: string, line: number, code: string, description: string}]}"},
-                {"role": "user", "content": f"Analyze this code:\n\n{code}"}
-            ],
-            temperature=0.7,
-            max_tokens=2000
-        )
-        
-        # Parse the response
-        analysis = json.loads(response.choices[0].message.content)
-        return analysis
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"LLM Analysis failed: {str(e)}")
 
 @router.post("/analyze")
 async def analyze_code(

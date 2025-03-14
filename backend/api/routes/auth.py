@@ -113,38 +113,47 @@ async def register(
 @router.get("/users")
 async def get_users(db: Session = Depends(get_db)):
     """Get all users with their login information"""
-    users = db.query(User).all()
-    return [{
-        "id": user.id,
-        "username": user.username,
-        "email": user.email,
-        "role": user.role,
-        "first_login_at": user.first_login_at.isoformat() if user.first_login_at else None,
-        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
-        "login_count": user.login_count,
-        "created_at": user.created_at.isoformat() if user.created_at else None
-    } for user in users]
+    try:
+        users = db.query(User).all()
+        return [{
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "picture": user.picture,
+            "role": user.role,
+            "first_login_at": user.first_login_at.isoformat() if user.first_login_at else None,
+            "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
+            "login_count": user.login_count,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "updated_at": user.updated_at.isoformat() if user.updated_at else None
+        } for user in users]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching users: {str(e)}")
 
 @router.get("/users/{user_id}")
 async def get_user(user_id: int, db: Session = Depends(get_db)):
     """Get a specific user with login information"""
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    return {
-        "id": user.id,
-        "username": user.username,
-        "email": user.email,
-        "role": user.role,
-        "first_login_at": user.first_login_at.isoformat() if user.first_login_at else None,
-        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
-        "login_count": user.login_count,
-        "created_at": user.created_at.isoformat() if user.created_at else None
-    }
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        return {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "picture": user.picture,
+            "role": user.role,
+            "first_login_at": user.first_login_at.isoformat() if user.first_login_at else None,
+            "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
+            "login_count": user.login_count,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "updated_at": user.updated_at.isoformat() if user.updated_at else None
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching user: {str(e)}")
 
 @router.post("/google-login")
 async def google_login(

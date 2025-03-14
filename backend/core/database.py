@@ -8,9 +8,8 @@ backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(backend_dir)
 
 # Import Base and models
-from models.user import Base, User
 from models.base import (
-    Analysis, DataDictionary, Review,
+    Base, User, Analysis, DataDictionary, Review,
     CodeSnippet, QueryExecution, Database,
     Table, Column
 )
