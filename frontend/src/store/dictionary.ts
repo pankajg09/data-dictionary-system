@@ -37,7 +37,7 @@ const useDictionaryStore = create<DictionaryState>((set, get) => ({
   fetchEntries: async () => {
     try {
       set({ isLoading: true, error: null });
-      const response = await api.get<DataDictionaryEntry[]>('/api/dictionary/entries');
+      const response = await api.get<DataDictionaryEntry[]>('/api/dictionary');
       set({ entries: response.data, isLoading: false });
     } catch (error) {
       set({ error: 'Failed to fetch entries', isLoading: false });
