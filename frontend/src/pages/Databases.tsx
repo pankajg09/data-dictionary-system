@@ -156,7 +156,7 @@ const Databases: React.FC = (): JSX.Element => {
   const [sqlAnalysisResult, setSqlAnalysisResult] = useState<SQLAnalysisResult | null>(null);
   const [analyzingSql, setAnalyzingSql] = useState<boolean>(false);
   const [sqlAnalysisError, setSqlAnalysisError] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'databases' | 'sqlAnalysis' | 'dataDictionary'>('databases');
+  const [viewMode, setViewMode] = useState<'databases' | 'sqlAnalysis'>('databases');
   const [selectedDatabase, setSelectedDatabase] = useState<string>('');
   const [sqlQueryResult, setSqlQueryResult] = useState<any | null>(null);
   const [executingSql, setExecutingSql] = useState<boolean>(false);
@@ -190,29 +190,9 @@ const Databases: React.FC = (): JSX.Element => {
     }
   };
 
-  const fetchDictionaryEntries = async () => {
-    setLoadingDictionary(true);
-    setDictionaryError(null);
-    try {
-      const response = await api.get<DataDictionaryEntry[]>('/api/dictionary/entries');
-      setDictionaryEntries(response.data);
-    } catch (err) {
-      console.error('Error fetching dictionary entries:', err);
-      setDictionaryError('Failed to load data dictionary entries. Please try again later.');
-    } finally {
-      setLoadingDictionary(false);
-    }
-  };
-
   useEffect(() => {
     fetchDatabases();
   }, []);
-
-  useEffect(() => {
-    if (viewMode === 'dataDictionary') {
-      fetchDictionaryEntries();
-    }
-  }, [viewMode]);
 
   useEffect(() => {
     if (selectedDb >= 0 && databases[selectedDb] && databases[selectedDb].tables.length > 0) {
@@ -626,84 +606,6 @@ const Databases: React.FC = (): JSX.Element => {
     );
   };
 
-  const renderDataDictionary = () => {
-    if (loadingDictionary) {
-      return (
-        <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
-          <CircularProgress />
-        </Box>
-      );
-    }
-
-    if (dictionaryError) {
-      return (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          {dictionaryError}
-        </Alert>
-      );
-    }
-
-    if (dictionaryEntries.length === 0) {
-      return (
-        <Alert severity="info">
-          No data dictionary entries found.
-        </Alert>
-      );
-    }
-
-    return (
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Table Name</TableCell>
-              <TableCell>Column Name</TableCell>
-              <TableCell>Data Type</TableCell>
-              <TableCell>Description</TableCell>
-              <TableCell>Source</TableCell>
-              <TableCell>Relationships</TableCell>
-              <TableCell>Last Updated</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {dictionaryEntries.map((entry) => (
-              <TableRow key={`${entry.table_name}-${entry.column_name}`}>
-                <TableCell>{entry.table_name}</TableCell>
-                <TableCell>{entry.column_name}</TableCell>
-                <TableCell>
-                  <Chip label={entry.data_type} color="primary" variant="outlined" size="small" />
-                </TableCell>
-                <TableCell>{entry.description}</TableCell>
-                <TableCell>
-                  <Chip
-                    label={entry.source || 'manual'}
-                    color={entry.source === 'analysis' ? 'secondary' : 'default'}
-                    size="small"
-                  />
-                </TableCell>
-                <TableCell>
-                  {entry.relationships && Array.isArray(entry.relationships) && entry.relationships.map((rel, index) => (
-                    <Chip
-                      key={index}
-                      label={rel}
-                      color="info"
-                      variant="outlined"
-                      size="small"
-                      sx={{ mr: 0.5, mb: 0.5 }}
-                    />
-                  ))}
-                </TableCell>
-                <TableCell>
-                  {entry.updated_at ? new Date(entry.updated_at).toLocaleString() : 'N/A'}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-    );
-  };
-
   if (location.pathname !== '/databases') {
     return <></>;
   }
@@ -737,15 +639,8 @@ const Databases: React.FC = (): JSX.Element => {
             <Button
               variant={viewMode === 'sqlAnalysis' ? 'contained' : 'outlined'}
               onClick={() => setViewMode('sqlAnalysis')}
-              sx={{ mr: 1 }}
             >
               SQL Analysis
-            </Button>
-            <Button
-              variant={viewMode === 'dataDictionary' ? 'contained' : 'outlined'}
-              onClick={() => setViewMode('dataDictionary')}
-            >
-              Data Dictionary
             </Button>
           </Box>
         </Box>
@@ -802,12 +697,6 @@ const Databases: React.FC = (): JSX.Element => {
             {viewMode === 'sqlAnalysis' && (
               <Box sx={{ p: 2 }}>
                 {renderSqlAnalysis()}
-              </Box>
-            )}
-            
-            {viewMode === 'dataDictionary' && (
-              <Box sx={{ p: 2 }}>
-                {renderDataDictionary()}
               </Box>
             )}
           </>

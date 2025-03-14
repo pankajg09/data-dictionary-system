@@ -52,10 +52,24 @@ const DataDictionary: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const { user: authUser } = useAuthStore();
+  const [newEntryDialogOpen, setNewEntryDialogOpen] = useState(false);
+  const [newEntry, setNewEntry] = useState<NewDictionaryEntry>({
+    table_name: '',
+    column_name: '',
+    data_type: '',
+    description: '',
+    created_by: user?.id || 0
+  });
 
   useEffect(() => {
     fetchEntries();
   }, []);
+
+  useEffect(() => {
+    if (user) {
+      setNewEntry(prev => ({ ...prev, created_by: user.id }));
+    }
+  }, [user]);
 
   const fetchEntries = async () => {
     try {
@@ -136,19 +150,22 @@ const DataDictionary: React.FC = () => {
   const handleAddEntry = async () => {
     if (!user) return;
 
-    const newEntry: NewDictionaryEntry = {
-      table_name: '',
-      column_name: '',
-      data_type: '',
-      description: '',
-      created_by: user.id,
-    };
-
     try {
-      await api.post('/api/dictionary', newEntry);
-      fetchEntries();
+      await api.post('/api/dictionary/entries', newEntry, {
+        params: { current_user_id: user.id }
+      });
+      await fetchEntries();
+      setNewEntryDialogOpen(false);
+      setNewEntry({
+        table_name: '',
+        column_name: '',
+        data_type: '',
+        description: '',
+        created_by: user.id
+      });
     } catch (error) {
       console.error('Failed to add dictionary entry:', error);
+      setError('Failed to add dictionary entry');
     }
   };
 
@@ -170,19 +187,7 @@ const DataDictionary: React.FC = () => {
           <Button
             variant="contained"
             color="primary"
-            onClick={() => {
-              setSelectedEntry({
-                id: 0,
-                table_name: '',
-                column_name: '',
-                data_type: '',
-                description: '',
-                created_by: user.id,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              });
-              setEditDialogOpen(true);
-            }}
+            onClick={() => setNewEntryDialogOpen(true)}
           >
             Add New Entry
           </Button>
@@ -254,6 +259,63 @@ const DataDictionary: React.FC = () => {
           </TableBody>
         </Table>
       </TableContainer>
+
+      {/* New Entry Dialog */}
+      <Dialog open={newEntryDialogOpen} onClose={() => setNewEntryDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          Add New Dictionary Entry
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            fullWidth
+            label="Table Name"
+            value={newEntry.table_name}
+            onChange={(e) => setNewEntry(prev => ({ ...prev, table_name: e.target.value }))}
+            margin="normal"
+            required
+          />
+          <TextField
+            fullWidth
+            label="Column Name"
+            value={newEntry.column_name}
+            onChange={(e) => setNewEntry(prev => ({ ...prev, column_name: e.target.value }))}
+            margin="normal"
+            required
+          />
+          <TextField
+            fullWidth
+            label="Data Type"
+            value={newEntry.data_type}
+            onChange={(e) => setNewEntry(prev => ({ ...prev, data_type: e.target.value }))}
+            margin="normal"
+            required
+          />
+          <TextField
+            fullWidth
+            label="Description"
+            value={newEntry.description}
+            onChange={(e) => setNewEntry(prev => ({ ...prev, description: e.target.value }))}
+            margin="normal"
+            multiline
+            rows={4}
+            required
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setNewEntryDialogOpen(false)} startIcon={<CancelIcon />}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleAddEntry}
+            variant="contained"
+            color="primary"
+            startIcon={<SaveIcon />}
+            disabled={!newEntry.table_name || !newEntry.column_name || !newEntry.data_type}
+          >
+            Save
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>
