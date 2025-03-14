@@ -321,8 +321,9 @@ async def analyze_sql(request: SQLAnalysisRequest, db: Session = Depends(get_db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error analyzing code: {str(e)}")
 
-@router.post("/execute-sql")
+@router.post("/{database_name}/execute-sql")
 async def execute_sql(
+    database_name: str,
     sql_query: str = Body(...),
     user_id: Optional[int] = Body(None),
     db: Session = Depends(get_db)
@@ -332,11 +333,11 @@ async def execute_sql(
     """
     try:
         # For SQLite databases
-        databases_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "databases")
-        db_path = os.path.join(databases_dir, "main.db")
+        databases_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "sample_dbs")
+        db_path = os.path.join(databases_dir, f"{database_name}.db")
         
         if not os.path.exists(db_path):
-            raise HTTPException(status_code=404, detail=f"Database not found")
+            raise HTTPException(status_code=404, detail=f"Database '{database_name}' not found")
         
         # Connect to the database
         conn = sqlite3.connect(db_path)
